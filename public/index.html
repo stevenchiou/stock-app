@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>台股 AI 決策系統</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #07090f;
+    --surface: rgba(255,255,255,0.025);
+    --border: rgba(255,255,255,0.07);
+    --green: #00ff88;
+    --red: #ff4455;
+    --yellow: #ffcc00;
+    --muted: #3d4858;
+    --text: #dde1ea;
+    --subtext: #9ca0b0;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Courier New', Courier, monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* grid bg */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    background-image:
+      linear-gradient(rgba(0,255,136,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,136,.035) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+
+  .wrap { position: relative; z-index: 1; max-width: 740px; margin: 0 auto; padding: 36px 18px 60px; }
+
+  /* ── Header ── */
+  .header { text-align: center; margin-bottom: 44px; }
+  .header .eyebrow { font-size: 10px; letter-spacing: 7px; color: var(--green); opacity: .65; margin-bottom: 10px; }
+  .header h1 {
+    font-size: clamp(26px, 6vw, 46px); font-weight: 900; letter-spacing: -1px; line-height: 1.05;
+    background: linear-gradient(130deg, #fff 0%, #00ff88 55%, #00ccff 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .header .sub { margin-top: 8px; font-size: 11px; color: var(--muted); letter-spacing: 2px; }
+
+  /* ── Card ── */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 22px 24px; margin-bottom: 18px;
+  }
+  .card-label { font-size: 10px; color: var(--muted); letter-spacing: 3px; margin-bottom: 12px; }
+
+  /* ── Search ── */
+  .search-box {
+    background: var(--surface); border: 1px solid rgba(0,255,136,.18);
+    border-radius: 16px; padding: 24px; margin-bottom: 28px;
+  }
+  .search-row { display: flex; gap: 12px; }
+  .input-wrap { flex: 1; position: relative; }
+  .input-wrap span { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--green); opacity: .55; font-size: 15px; }
+  input[type=text] {
+    width: 100%; background: rgba(0,255,136,.045); border: 1px solid rgba(0,255,136,.25);
+    border-radius: 10px; padding: 13px 13px 13px 34px;
+    color: var(--text); font-size: 15px; font-family: inherit; outline: none;
+    transition: border-color .2s;
+  }
+  input[type=text]:focus { border-color: var(--green); }
+  .btn {
+    background: linear-gradient(135deg, #00ff88, #00ccaa);
+    border: none; border-radius: 10px; padding: 13px 26px;
+    color: #07090f; font-weight: 800; font-size: 14px; font-family: inherit;
+    cursor: pointer; white-space: nowrap; transition: all .2s;
+  }
+  .btn:disabled { background: rgba(0,255,136,.1); color: var(--muted); cursor: not-allowed; }
+  .quick-picks { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    background: rgba(0,255,136,.05); border: 1px solid rgba(0,255,136,.18);
+    border-radius: 6px; padding: 4px 11px; color: var(--green);
+    font-size: 11px; font-family: inherit; cursor: pointer; transition: background .15s;
+  }
+  .chip:hover { background: rgba(0,255,136,.14); }
+
+  /* ── Loading ── */
+  .loading { text-align: center; padding: 56px 0; }
+  .spinner { font-size: 36px; display: inline-block; animation: spin 1.2s linear infinite; }
+  .loading-text { margin-top: 16px; color: var(--green); font-size: 13px; letter-spacing: 3px; animation: pulse 1.6s infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+  /* ── Error ── */
+  .error-box {
+    background: rgba(255,68,85,.08); border: 1px solid rgba(255,68,85,.35);
+    border-radius: 12px; padding: 16px 20px; color: #ff8899; font-size: 14px; margin-bottom: 18px;
+  }
+
+  /* ── Stock header ── */
+  .stock-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  .stock-meta { font-size: 11px; color: var(--muted); letter-spacing: 3px; margin-bottom: 5px; }
+  .stock-name { font-size: 26px; font-weight: 900; }
+  .stock-period { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .price-main { font-size: 34px; font-weight: 900; }
+  .price-change { font-size: 13px; }
+
+  /* ── Chart ── */
+  svg.chart { width: 100%; height: 90px; display: block; }
+
+  /* ── Indicators ── */
+  .indicators { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-bottom: 18px; }
+  .ind-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 14px; }
+  .ind-label { font-size: 10px; color: var(--muted); letter-spacing: 2px; margin-bottom: 8px; }
+  .ind-value { font-size: 20px; font-weight: 800; }
+
+  /* ── Action ── */
+  .action-card {
+    border-radius: 16px; padding: 26px 28px;
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
+    margin-bottom: 18px;
+  }
+  .action-label { font-size: 10px; letter-spacing: 4px; opacity: .75; margin-bottom: 6px; }
+  .action-value { font-size: 52px; font-weight: 900; line-height: 1; }
+  .action-right { text-align: right; }
+  .action-right .sub-label { font-size: 10px; color: var(--muted); margin-bottom: 3px; }
+  .action-right .sub-value { font-size: 22px; font-weight: 700; }
+
+  /* ── Confidence + Risk ── */
+  .cr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+  .conf-num { font-size: 38px; font-weight: 900; }
+  .conf-bar-bg { margin-top: 12px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.07); position: relative; overflow: hidden; }
+  .conf-bar-fill { position: absolute; left: 0; top: 0; height: 100%; border-radius: 2px; transition: width .8s ease; }
+  .risk-note { font-size: 11px; color: var(--muted); margin-top: 8px; }
+
+  /* ── Reasoning ── */
+  .reasoning { font-size: 14px; line-height: 1.85; color: var(--subtext); }
+  .key-factors { margin-top: 18px; }
+  .kf-item { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .kf-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+  .kf-text { font-size: 13px; color: var(--subtext); }
+
+  /* ── Footer ── */
+  .footer { text-align: center; font-size: 10px; color: #2a3040; line-height: 1.9; margin-top: 4px; }
+
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="eyebrow">TWSE LIVE DATA · AI ANALYSIS ENGINE</div>
+    <h1>台股 AI 決策系統</h1>
+    <div class="sub">真實收盤數據 · 技術指標分析 · AI 投資建議</div>
+  </div>
+
+  <!-- Search -->
+  <div class="search-box">
+    <div class="search-row">
+      <div class="input-wrap">
+        <span>$</span>
+        <input type="text" id="codeInput" placeholder="輸入台股代碼，例如 2330" />
+      </div>
+      <button class="btn" id="analyseBtn" onclick="runAnalysis()">開始分析</button>
+    </div>
+    <div class="quick-picks" id="quickPicks"></div>
+  </div>
+
+  <!-- Loading -->
+  <div class="loading hidden" id="loading">
+    <div class="spinner">⟳</div>
+    <div class="loading-text" id="loadingText">從證交所抓真實數據中…</div>
+  </div>
+
+  <!-- Error -->
+  <div class="error-box hidden" id="errorBox"></div>
+
+  <!-- Results -->
+  <div id="results" class="hidden">
+
+    <!-- Stock header -->
+    <div class="card">
+      <div class="stock-header">
+        <div>
+          <div class="stock-meta" id="stockMeta"></div>
+          <div class="stock-name" id="stockName"></div>
+          <div class="stock-period" id="stockPeriod"></div>
+        </div>
+        <div style="text-align:right">
+          <div class="price-main" id="priceMain"></div>
+          <div class="price-change" id="priceChange"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div class="card">
+      <div class="card-label">近期收盤走勢（真實數據）</div>
+      <svg class="chart" id="chartSvg" viewBox="0 0 320 90"></svg>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:4px">
+        <span id="dateFrom"></span><span id="dateTo"></span>
+      </div>
+    </div>
+
+    <!-- Indicators -->
+    <div class="indicators">
+      <div class="ind-card"><div class="ind-label">5日均線</div><div class="ind-value" id="sma5">—</div></div>
+      <div class="ind-card"><div class="ind-label">20日均線</div><div class="ind-value" id="sma20">—</div></div>
+      <div class="ind-card"><div class="ind-label">RSI (14)</div><div class="ind-value" id="rsiVal">—</div></div>
+    </div>
+
+    <!-- Action -->
+    <div class="action-card" id="actionCard">
+      <div>
+        <div class="action-label" id="actionLabel">AI 建議操作</div>
+        <div class="action-value" id="actionValue"></div>
+      </div>
+      <div class="action-right">
+        <div class="sub-label">預測方向</div>
+        <div class="sub-value" id="predDirection"></div>
+        <div class="sub-label" style="margin-top:10px">目標價位</div>
+        <div class="sub-value" id="targetPrice"></div>
+      </div>
+    </div>
+
+    <!-- Confidence + Risk -->
+    <div class="cr-grid">
+      <div class="card">
+        <div class="card-label">信心指數</div>
+        <div class="conf-num" id="confNum"></div>
+        <div class="conf-bar-bg"><div class="conf-bar-fill" id="confBar"></div></div>
+      </div>
+      <div class="card">
+        <div class="card-label">風險評估</div>
+        <div class="conf-num" id="riskVal"></div>
+        <div class="risk-note" id="riskNote"></div>
+      </div>
+    </div>
+
+    <!-- Reasoning -->
+    <div class="card">
+      <div class="card-label">AI 技術面分析</div>
+      <div class="reasoning" id="reasoning"></div>
+      <div class="key-factors" id="keyFactors"></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      數據來源：台灣證券交易所（TWSE）官方 API · 分析僅供參考，不構成投資建議<br/>
+      股市有風險，虧了不要來找我 🙃
+    </div>
+
+  </div><!-- /results -->
+</div><!-- /wrap -->
+
+<script>
+const KNOWN = {
+  "2330":"台積電","2317":"鴻海","2454":"聯發科","2308":"台達電",
+  "2881":"富邦金","2882":"國泰金","2412":"中華電","2303":"聯電",
+  "6505":"台塑化","1301":"台塑","2002":"中鋼","2382":"廣達",
+  "3008":"大立光","2357":"華碩",
+};
+
+// ── Quick picks ───────────────────────────────────────────────────────────────
+const qp = document.getElementById("quickPicks");
+Object.entries(KNOWN).slice(0,8).forEach(([c,n]) => {
+  const btn = document.createElement("button");
+  btn.className = "chip";
+  btn.textContent = `${c} ${n}`;
+  btn.onclick = () => { document.getElementById("codeInput").value = c; runAnalysis(c); };
+  qp.appendChild(btn);
+});
+
+document.getElementById("codeInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") runAnalysis();
+});
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function sma(prices, n) {
+  if (prices.length < n) return null;
+  const s = prices.slice(-n).reduce((a,b) => a+b, 0);
+  return (s / n).toFixed(2);
+}
+
+function rsi(prices, n=14) {
+  if (prices.length < n+1) return null;
+  const ch = prices.slice(-n-1).map((p,i,a) => i===0 ? 0 : p-a[i-1]).slice(1);
+  const avgG = ch.map(c => c>0?c:0).reduce((a,b)=>a+b,0)/n;
+  const avgL = ch.map(c => c<0?-c:0).reduce((a,b)=>a+b,0)/n;
+  if (avgL===0) return "100.0";
+  return (100 - 100/(1+avgG/avgL)).toFixed(1);
+}
+
+function drawChart(data, color) {
+  const svg = document.getElementById("chartSvg");
+  const prices = data.map(d => d.close);
+  const W=320, H=90, P=6;
+  const min = Math.min(...prices), max = Math.max(...prices), range = max-min||1;
+  const pts = prices.map((p,i) => {
+    const x = P + (i/(prices.length-1))*(W-P*2);
+    const y = P + ((max-p)/range)*(H-P*2);
+    return [x,y];
+  });
+  const line = pts.map(p=>p.join(",")).join(" ");
+  const area = [`${P},${H-P}`, ...pts.map(p=>p.join(",")), `${W-P},${H-P}`].join(" ");
+  const last = pts[pts.length-1];
+  svg.innerHTML = `
+    <defs>
+      <linearGradient id="cg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${color}" stop-opacity="0.28"/>
+        <stop offset="100%" stop-color="${color}" stop-opacity="0.02"/>
+      </linearGradient>
+    </defs>
+    <polygon points="${area}" fill="url(#cg)"/>
+    <polyline points="${line}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="4" fill="${color}"/>
+  `;
+}
+
+// ── Fetch TWSE via local proxy ────────────────────────────────────────────────
+async function fetchMonth(code, year, month) {
+  const res = await fetch(`/api/stock?code=${code}&year=${year}&month=${month}`);
+  const data = await res.json();
+  if (data.stat !== "OK" || !data.data?.length) return [];
+  return data.data.map(row => ({
+    date: row[0],
+    open:  parseFloat(row[3].replace(/,/g,"")),
+    high:  parseFloat(row[4].replace(/,/g,"")),
+    low:   parseFloat(row[5].replace(/,/g,"")),
+    close: parseFloat(row[6].replace(/,/g,"")),
+    volume: parseInt(row[1].replace(/,/g,""),10),
+  })).filter(d => !isNaN(d.close));
+}
+
+async function fetchPriceData(code) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth()+1;
+  let data = await fetchMonth(code, y, m);
+  if (data.length < 5) {
+    const pm = m===1?12:m-1, py = m===1?y-1:y;
+    const prev = await fetchMonth(code, py, pm);
+    data = [...prev, ...data];
+  }
+  return data.slice(-30);
+}
+
+// ── AI ────────────────────────────────────────────────────────────────────────
+async function callAI(code, name, priceData) {
+  const closes = priceData.map(d=>d.close);
+  const latest = closes[closes.length-1];
+  const oldest = closes[0];
+  const changePct = (((latest-oldest)/oldest)*100).toFixed(2);
+  const high = Math.max(...closes), low = Math.min(...closes);
+  const s5 = sma(closes,5), s20 = sma(closes,20), r = rsi(closes);
+  const vol = priceData[priceData.length-1]?.volume?.toLocaleString() ?? "N/A";
+
+  const prompt = `你是一位專業的台灣股市技術分析師。請根據以下真實市場數據分析並給出投資建議：
+
+股票代碼：${code}
+股票名稱：${name}
+目前收盤價：NT$${latest}
+區間高點：NT$${high}
+區間低點：NT$${low}
+區間漲跌幅：${changePct}%
+5日均線：NT$${s5 ?? "資料不足"}
+20日均線：NT$${s20 ?? "資料不足"}
+RSI(14)：${r ?? "資料不足"}
+最新成交量：${vol} 股
+
+請以JSON格式回應（只回JSON，不含任何其他文字或Markdown）：
+{
+  "prediction": "上漲|下跌|盤整",
+  "targetPrice": 數字,
+  "confidence": 1到100整數,
+  "risk": "低|中|高",
+  "action": "買進|賣出|觀望",
+  "reasoning": "100字以內的技術面分析",
+  "keyFactors": ["技術因素1", "技術因素2", "技術因素3"]
+}`;
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": window.ANTHROPIC_API_KEY || "" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  const raw = await res.json();
+  const text = raw.content.map(b=>b.text||"").join("");
+  return JSON.parse(text.replace(/```json|```/g,"").trim());
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+async function runAnalysis(overrideCode) {
+  const code = (overrideCode ?? document.getElementById("codeInput").value).trim();
+  if (!code) return;
+  document.getElementById("codeInput").value = code;
+
+  // reset UI
+  ["results","errorBox"].forEach(id => document.getElementById(id).classList.add("hidden"));
+  document.getElementById("loading").classList.remove("hidden");
+  document.getElementById("analyseBtn").disabled = true;
+
+  try {
+    document.getElementById("loadingText").textContent = "從證交所抓真實數據中…";
+    const data = await fetchPriceData(code);
+    if (!data.length) throw new Error("查無此股票代碼，或今日尚無交易資料");
+
+    const name = KNOWN[code] ?? code;
+    const closes = data.map(d=>d.close);
+    const latest = data[data.length-1];
+    const prev   = data[data.length-2];
+    const delta  = prev ? latest.close - prev.close : 0;
+    const deltaPct = prev ? ((delta/prev.close)*100).toFixed(2) : "0.00";
+    const isUp   = delta >= 0;
+    const color  = isUp ? "#00ff88" : "#ff4455";
+
+    // stock header
+    document.getElementById("stockMeta").textContent = `${code} · 台灣證交所 · 真實數據`;
+    document.getElementById("stockName").textContent = name;
+    document.getElementById("stockPeriod").textContent = `資料期間：${data[0].date} ～ ${latest.date}（${data.length} 個交易日）`;
+    document.getElementById("priceMain").style.color = color;
+    document.getElementById("priceMain").textContent = `NT$${latest.close.toFixed(2)}`;
+    document.getElementById("priceChange").style.color = color;
+    document.getElementById("priceChange").textContent = `${isUp?"▲":"▼"} ${Math.abs(delta).toFixed(2)} (${isUp?"+":""}${deltaPct}%)`;
+
+    // chart
+    drawChart(data, color);
+    document.getElementById("dateFrom").textContent = data[0].date;
+    document.getElementById("dateTo").textContent   = latest.date;
+
+    // indicators
+    const s5  = sma(closes,5);
+    const s20 = sma(closes,20);
+    const r   = rsi(closes);
+    const el5  = document.getElementById("sma5");
+    const el20 = document.getElementById("sma20");
+    const elR  = document.getElementById("rsiVal");
+    el5.textContent  = s5  ? `$${s5}`  : "—";
+    el5.style.color  = s5  ? (latest.close > s5  ? "#00ff88" : "#ff4455") : "#3d4858";
+    el20.textContent = s20 ? `$${s20}` : "—";
+    el20.style.color = s20 ? (latest.close > s20 ? "#00ff88" : "#ff4455") : "#3d4858";
+    elR.textContent  = r ?? "—";
+    elR.style.color  = r ? (r>70?"#ff4455":r<30?"#00ff88":"#ffcc00") : "#3d4858";
+
+    // AI
+    document.getElementById("loadingText").textContent = "Claude 正在研究怎麼幫你賺錢…";
+    const ai = await callAI(code, name, data);
+
+    // action card
+    const AC = { 買進:{bg:"rgba(0,255,136,.1)",border:"#00ff88",text:"#00ff88"}, 賣出:{bg:"rgba(255,68,85,.1)",border:"#ff4455",text:"#ff4455"}, 觀望:{bg:"rgba(255,204,0,.1)",border:"#ffcc00",text:"#ffcc00"} };
+    const PC = { 上漲:"#00ff88", 下跌:"#ff4455", 盤整:"#ffcc00" };
+    const s = AC[ai.action] ?? AC["觀望"];
+    const ac = document.getElementById("actionCard");
+    ac.style.background = s.bg; ac.style.border = `2px solid ${s.border}`;
+    document.getElementById("actionLabel").style.color = s.text;
+    document.getElementById("actionValue").style.color = s.text;
+    document.getElementById("actionValue").textContent = ai.action;
+    document.getElementById("predDirection").style.color = PC[ai.prediction] ?? "#fff";
+    document.getElementById("predDirection").textContent = ai.prediction;
+    document.getElementById("targetPrice").textContent = `NT$${ai.targetPrice}`;
+
+    // confidence
+    const confColor = ai.confidence>65?"#00ff88":ai.confidence>40?"#ffcc00":"#ff4455";
+    document.getElementById("confNum").style.color = confColor;
+    document.getElementById("confNum").textContent = ai.confidence + "%";
+    document.getElementById("confBar").style.background = confColor;
+    document.getElementById("confBar").style.width = ai.confidence + "%";
+
+    // risk
+    const riskColor = ai.risk==="低"?"#00ff88":ai.risk==="中"?"#ffcc00":"#ff4455";
+    document.getElementById("riskVal").style.color = riskColor;
+    document.getElementById("riskVal").textContent = ai.risk + "風險";
+    document.getElementById("riskNote").textContent = ai.risk==="低"?"適合保守型，相對穩健":ai.risk==="中"?"波動適中，注意進出場":"高波動，務必設停損";
+
+    // reasoning
+    document.getElementById("reasoning").textContent = ai.reasoning;
+    const kf = document.getElementById("keyFactors");
+    kf.innerHTML = ai.keyFactors?.length
+      ? `<div style="font-size:10px;color:var(--muted);letter-spacing:3px;margin-bottom:10px">關鍵因素</div>` +
+        ai.keyFactors.map(f=>`<div class="kf-item"><div class="kf-dot"></div><span class="kf-text">${f}</span></div>`).join("")
+      : "";
+
+    document.getElementById("results").classList.remove("hidden");
+  } catch(e) {
+    const eb = document.getElementById("errorBox");
+    eb.textContent = "⚠ " + (e.message || "發生錯誤，請稍後再試");
+    eb.classList.remove("hidden");
+  } finally {
+    document.getElementById("loading").classList.add("hidden");
+    document.getElementById("analyseBtn").disabled = false;
+  }
+}
+</script>
+</body>
+</html>
