@@ -7,29 +7,68 @@ const app = express();
 app.use(cors());
 app.use(express.static(path.join(__dirname, "public")));
 
-// ── TWSE proxy endpoint ───────────────────────────────────────────────────────
-// GET /api/stock?code=2330&year=2025&month=4
-app.get("/api/stock", async (req, res) => {
-  const { code, year, month } = req.query;
-  if (!code || !year || !month) {
-    return res.status(400).json({ error: "缺少參數 code / year / month" });
-  }
+// ── stooq CSV parser ──────────────────────────────────────────────────────────
+// stooq returns CSV: Date,Open,High,Low,Close,Volume
+function parseStooqCSV(csv) {
+  const lines = csv.trim().split("\n");
+  if (lines.length < 2) return [];
+  return lines.slice(1) // skip header
+    .map(line => {
+      const [date, open, high, low, close, volume] = line.split(",");
+      return {
+        date,
+        open:   parseFloat(open),
+        high:   parseFloat(high),
+        low:    parseFloat(low),
+        close:  parseFloat(close),
+        volume: parseInt(volume) || 0,
+      };
+    })
+    .filter(d => !isNaN(d.close) && d.close > 0)
+    .reverse(); // stooq returns newest first, flip to oldest first
+}
 
-  const ym = `${year}${String(month).padStart(2, "0")}01`;
-  const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${ym}&stockNo=${code}`;
+// ── /api/stock?code=2330 ──────────────────────────────────────────────────────
+app.get("/api/stock", async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).json({ error: "缺少參數 code" });
+
+  // stooq uses lowercase symbol with .tw suffix
+  const symbol = `${code}.tw`;
+  const url = `https://stooq.com/q/d/l/?s=${symbol}&i=d`;
 
   try {
-    const twseRes = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0" },
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+      },
     });
-    const data = await twseRes.json();
-    res.json(data);
+
+    if (!r.ok) throw new Error(`stooq responded with ${r.status}`);
+
+    const csv = await r.text();
+
+    // stooq returns "No data" page if symbol not found
+    if (!csv.includes("Date") || csv.includes("Przekroczony")) {
+      return res.status(404).json({ error: "查無此股票代碼" });
+    }
+
+    const data = parseStooqCSV(csv);
+
+    if (!data.length) {
+      return res.status(404).json({ error: "查無交易資料" });
+    }
+
+    // Return last 30 trading days
+    res.json({ stat: "OK", data: data.slice(-30) });
+
   } catch (e) {
-    res.status(500).json({ error: "無法連接台灣證交所", detail: e.message });
+    console.error("fetch error:", e.message);
+    res.status(500).json({ error: "無法取得股價數據", detail: e.message });
   }
 });
 
-// ── Fallback: serve index.html ────────────────────────────────────────────────
+// ── Fallback ──────────────────────────────────────────────────────────────────
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });

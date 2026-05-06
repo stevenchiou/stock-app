@@ -321,31 +321,12 @@ function drawChart(data, color) {
   `;
 }
 
-// ── Fetch TWSE via local proxy ────────────────────────────────────────────────
-async function fetchMonth(code, year, month) {
-  const res = await fetch(`/api/stock?code=${code}&year=${year}&month=${month}`);
-  const data = await res.json();
-  if (data.stat !== "OK" || !data.data?.length) return [];
-  return data.data.map(row => ({
-    date: row[0],
-    open:  parseFloat(row[3].replace(/,/g,"")),
-    high:  parseFloat(row[4].replace(/,/g,"")),
-    low:   parseFloat(row[5].replace(/,/g,"")),
-    close: parseFloat(row[6].replace(/,/g,"")),
-    volume: parseInt(row[1].replace(/,/g,""),10),
-  })).filter(d => !isNaN(d.close));
-}
-
+// ── Fetch via stooq proxy ─────────────────────────────────────────────────────
 async function fetchPriceData(code) {
-  const now = new Date();
-  const y = now.getFullYear(), m = now.getMonth()+1;
-  let data = await fetchMonth(code, y, m);
-  if (data.length < 5) {
-    const pm = m===1?12:m-1, py = m===1?y-1:y;
-    const prev = await fetchMonth(code, py, pm);
-    data = [...prev, ...data];
-  }
-  return data.slice(-30);
+  const res = await fetch(`/api/stock?code=${code}`);
+  const json = await res.json();
+  if (json.stat !== "OK" || !json.data?.length) throw new Error(json.error || "查無此股票代碼");
+  return json.data; // already shaped: { date, open, high, low, close, volume }
 }
 
 // ── AI ────────────────────────────────────────────────────────────────────────
